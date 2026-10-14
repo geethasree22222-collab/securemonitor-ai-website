@@ -1,0 +1,15 @@
+{
+  "name": "securemonitor-ai",
+  "version": "1.0.0",
+  "private": true,
+  "description": "SecureMonitor AI device behaviour monitoring dashboard and Node backend",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "check": "node --check server.js",
+    "smoke-test": "node smoke-test.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
