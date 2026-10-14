@@ -65,7 +65,7 @@ async function pickBase(){
 }
 const NA='Not available';const OUT='<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>';
 let S={srvAlerts:[],tab:'dash',demo:null,metrics:null,ev:null,last:null,alerts:[],sel:null,
- cfg:{poll:30,cooldown:10,base:'',token:'',email:true,push:false,cats:{temp:true,batt:true,stor:true,net:true,iot:true}},thresholds:{laptop:{cpuMedium:70,cpuHigh:90,ramMedium:75,ramHigh:90,diskMedium:80,diskHigh:92},mobile:{batteryMedium:20,batteryHigh:10,temperatureMedium:40,temperatureHigh:45,storageMedium:80,storageHigh:92},iot:{temperatureMedium:40,temperatureHigh:55,voltageLow:3,voltageHigh:5.5,currentHigh:2}},remote:null,remoteErr:null,user:null,access:null,guest:false,screen:'login',authMsg:'',authOk:false,resetToken:null,conn:null};
+ cfg:{poll:30,cooldown:10,base:'',token:'',email:true,push:false,cats:{temp:true,batt:true,stor:true,net:true,iot:true}},thresholds:{laptop:{cpuMedium:70,cpuHigh:90,ramMedium:75,ramHigh:90,diskMedium:80,diskHigh:92},mobile:{batteryMedium:20,batteryHigh:10,temperatureMedium:40,temperatureHigh:45,storageMedium:80,storageHigh:92},iot:{temperatureMedium:40,temperatureHigh:55,voltageLow:3,voltageHigh:5.5,currentHigh:2}},remote:null,remoteErr:null,user:null,access:null,guest:false,screen:'login',authMsg:'',authOk:false,resetToken:null,conn:null,emailConfigured:false,geminiConfigured:false,n8nConfigured:false};
 try{Object.assign(S.cfg,JSON.parse(localStorage.getItem('sm_cfg')||'{}'));S.alerts=JSON.parse(localStorage.getItem('sm_alerts')||'[]')}catch(e){}
 S.cfg.override='';
 S.cfg.base=resolveBase();
@@ -115,9 +115,9 @@ function refreshSession(){
 async function api(path,opt){
  let r=await raw(path,opt);
  if(r.status===401){if(await refreshSession())r=await raw(path,opt);if(r.status===401){expire();throw new Error('Your session has expired. Please log in again.')}}
- if(!r.ok)throw new Error('Unable to connect to monitoring service.');
+ if(!r.ok){let d={};try{d=await r.json()}catch(e){};throw new Error(d.message||d.error||'Unable to connect to monitoring service.')}
  return r.json()}
-async function health(){if(!S.cfg.base){S.conn=null;return}try{const r=await raw('/api/health');S.conn=r.ok}catch(e){S.conn=false}}
+async function health(){if(!S.cfg.base){S.conn=null;return}try{const r=await raw('/api/health');S.conn=r.ok;const d=r.ok?await r.json():{};S.emailConfigured=!!d.emailConfigured;S.geminiConfigured=!!d.geminiConfigured;S.n8nConfigured=!!d.n8nConfigured}catch(e){S.conn=false}}
 async function pullRemote(){
  if(!S.cfg.base||!S.user){S.remote=null;S.remoteErr=null;return}
  try{const d=await api('/api/devices');S.remote=Array.isArray(d)?d:[];S.remoteErr=null
@@ -196,7 +196,8 @@ function alertList(l){
 function devicesPage(){
  const rows=[[S.metrics.kind+' (this device)',S.metrics.kind,S.demo?'Demo':'Connected',S.last.toLocaleTimeString(),S.ev.risk]].concat((S.remote||[]).map(x=>[x.name||x.type,x.type,x.connected?'Connected':'Offline',x.updatedAt?new Date(x.updatedAt).toLocaleTimeString():NA,x.risk||null]));
  return `<header class="top"><div><h1>Devices</h1><div class="mu">All devices registered to your account.</div></div></header><div class="card"><div class="tw"><table class="tb"><thead><tr><th>Name</th><th>Type</th><th>Connection</th><th>Last Updated</th><th>Risk</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${esc(r[0])}</td><td>${esc(r[1])}</td><td>${r[2]}</td><td>${r[3]}</td><td>${r[4]?badge(esc(r[4])):'<span class="mu">'+NA+'</span>'}</td></tr>`).join('')}</tbody></table></div></div>
- <div class="card" style="margin-top:12px"><h2>Optional IoT Hardware <span class="badge demo">Optional</span></h2><p class="mu">Connect an ESP32-based sensor device for additional environmental and electrical monitoring.</p><span class="badge" style="color:var(--mu);border-color:var(--mu)">${(S.remote||[]).some(x=>(x.type||'').toLowerCase()==='iot'&&x.connected)?'Connected':'Not Connected'}</span><p class="mu sm">Hardware not connected. Devices appear here once their agent reports to your backend.</p><button class="b p" data-act="hw">Connect Hardware</button><p id="fl" role="status"></p></div>`}
+ <div class="card" style="margin-top:12px"><h2>Laptop Monitoring Agent</h2><p class="mu">Generate a one-time device key for the Windows agent. The agent reads real CPU, RAM, disk, network transfer, and running process count from this laptop and sends telemetry to the backend.</p><p class="mu sm">Keep the key private. Generating a new key replaces the previous laptop/agent key for this account.</p><button class="b p" data-act="laptop-agent">Connect Laptop Agent</button><p id="fl" role="status"></p></div>
+ <div class="card" style="margin-top:12px"><h2>Optional IoT Hardware <span class="badge demo">Optional</span></h2><p class="mu">Connect an ESP32-based sensor device for additional environmental and electrical monitoring.</p><span class="badge" style="color:var(--mu);border-color:var(--mu)">${(S.remote||[]).some(x=>(x.type||'').toLowerCase()==='iot'&&x.connected)?'Connected':'Not Connected'}</span><p class="mu sm">Hardware is optional. Devices appear here once their agent reports to your backend.</p><button class="b" data-act="hw">Generate IoT/Hardware Key</button></div>`}
 function alertsPage(){
  const a=allAlerts().find(x=>x.id===S.sel);
  return `<header class="top"><h1>Alerts</h1></header><div class="card">${alertList(allAlerts())}</div>
@@ -208,7 +209,7 @@ function settings(){
  return `<header class="top"><h1>Settings</h1></header>
  <div class="card" style="margin-bottom:12px"><h2>Notification Settings</h2>${sw('email','Email Notifications',c.email)}${sw('push','Push Notifications',c.push)}
  ${sw('temp','High Device Temperature',c.cats.temp)}${sw('batt','Low Battery',c.cats.batt)}${sw('stor','Storage Almost Full',c.cats.stor)}${sw('net','Unusual Network Activity',c.cats.net)}${sw('iot','IoT Sensor Anomaly',c.cats.iot)}
- <p class="mu sm">Emails are sent by your backend/n8n flow, not by this page. Press Save to apply.</p></div>
+ <p class="mu sm">Mail provider: <b>${S.emailConfigured?'Configured':'Not configured'}</b>. Real alerts send email when the backend classifies risk as HIGH. Use Test Email to verify the configured sender.</p><p id="emailTestStatus" role="status" class="sm"></p><button class="b" id="testEmail">Send Test Email</button></div>
  <div class="card"><h2>Monitoring</h2><p><label>Polling (seconds) <input id="poll" type="number" min="5" value="${c.poll}" style="width:90px"></label></p>
  <p><label>Alert cooldown (minutes) <input id="cd" type="number" min="1" value="${c.cooldown}" style="width:90px"></label></p>
  <p class="mu sm">Backend: <b>${esc(S.cfg.base||'Not connected')}</b></p>
@@ -234,6 +235,7 @@ document.addEventListener('click',async e=>{
   if(!S.user||!S.cfg.base){flash('Sign in and connect the backend before saving thresholds.',false);return}
   try{S.thresholds=await api('/api/settings/thresholds',{method:'PUT',body:JSON.stringify(next)});flash('Risk thresholds saved to backend.',true);await refresh()}catch(err){flash('Could not save thresholds. Check backend deployment.',false)}return;
  }
+ if(t.id==='testEmail'){const st=$('#emailTestStatus');if(st)st.textContent='Sending test email…';t.disabled=true;try{const r=await api('/api/notifications/test-email',{method:'POST',body:'{}'});if(st){st.textContent=r.message+' Recipient: '+r.to;st.className='ok sm'}}catch(err){if(st){st.textContent=err.message||'Email test failed. Configure the email provider in Render.';st.className='err sm'}}finally{t.disabled=false}return}
  if(t.id==='sv'){S.cfg.poll=Math.max(5,+$('#poll').value||30);S.cfg.cooldown=Math.max(1,+$('#cd').value||10);save();startPoll();await refresh();
   if(S.user){try{await api('/api/settings/notifications',{method:'PUT',body:JSON.stringify({email:S.cfg.email,push:S.cfg.push,cats:S.cfg.cats})});flash('Settings saved successfully',true)}catch(x){flash('Settings could not be saved. Please try again.')}}else flash('Sign in to save notification settings.');return}
  if(t.id==='clr'){S.alerts=[];save();render()}
@@ -308,7 +310,7 @@ document.addEventListener('click',async e=>{
  const t=e.target,a=t.dataset&&t.dataset.act;
  if(t.dataset&&t.dataset.go)return go(t.dataset.go);
  
- if(a==='hw'){try{const k=await api('/api/devices/agent-key',{method:'POST'});if(!k||typeof k.key!=='string')throw 0;flash('Agent key (shown once): '+k.key+'  Send it as the X-Device-Key header to POST '+S.cfg.base+'/api/telemetry/laptop, /mobile or /iot.',true)}catch(e){flash('This feature is not configured yet.')}}
+ if(a==='hw'||a==='laptop-agent'){try{const k=await api('/api/devices/agent-key',{method:'POST'});if(!k||typeof k.key!=='string')throw 0;flash('DEVICE KEY (copy now; shown once): '+k.key+' | API: '+S.cfg.base+'/api/telemetry/laptop | Enter this key into laptop_agent.py when prompted. Generating another key replaces this one.',true)}catch(e){flash('Sign in and try again. Could not generate a device key. '+(e.message||''),false)}}
  if(a==='guest'){S.guest=true;openApp()}
  if(a==='logout')logout();
  });

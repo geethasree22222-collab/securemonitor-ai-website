@@ -65,16 +65,16 @@ function assess(type,t,custom){
 
 async function sendAlertEmail(to,alert){
  const key=process.env.RESEND_API_KEY,from=process.env.ALERT_FROM_EMAIL;
- if(!key||!from||!to){console.warn('[email] Not sent: configure RESEND_API_KEY, ALERT_FROM_EMAIL, and user email.');return}
+ if(!key||!from||!to){console.warn('[email] Not sent: configure RESEND_API_KEY, ALERT_FROM_EMAIL, and user email.');return {ok:false,reason:'not_configured'}}
  try{
   const r=await fetch('https://api.resend.com/emails',{method:'POST',headers:{Authorization:'Bearer '+key,'Content-Type':'application/json'},body:JSON.stringify({
    from,to:[to],subject:`SecureMonitor AI ${alert.risk} alert: ${alert.device}`,
    text:`SecureMonitor AI Alert\n\nDevice: ${alert.device}\nType: ${alert.alertType}\nRisk: ${alert.risk}\nAnomaly score: ${alert.anomalyScore}\nTime: ${alert.time}\nReason: ${alert.reason}\n\nRecommended actions:\n${(alert.recommendations||[]).map(x=>'- '+x).join('\n')}\n\nThis alert does not by itself confirm hacking or compromise.`
   })});
   const data=await r.json().catch(()=>({}));
-  if(!r.ok)console.error('[email] Provider rejected alert:',r.status,JSON.stringify(data));
-  else console.log('[email] Provider accepted alert',data.id||'(id unavailable)');
- }catch(e){console.error('[email] Delivery request failed:',e.message)}
+  if(!r.ok){console.error('[email] Provider rejected alert:',r.status,JSON.stringify(data));return {ok:false,reason:'provider_rejected',status:r.status,message:data.message||data.error||'Email provider rejected the request'}}
+  console.log('[email] Provider accepted alert',data.id||'(id unavailable)');return {ok:true,id:data.id||null}
+ }catch(e){console.error('[email] Delivery request failed:',e.message);return {ok:false,reason:'delivery_error'}}
 }
 
 function ingest(o,type,t){
@@ -86,7 +86,7 @@ function ingest(o,type,t){
  if(alertsDb.find(x=>x.userId===o.id&&x.key===key&&Date.now()-Date.parse(x.time)<COOL))return; // cooldown / dedupe
  const al={id:c.randomUUID(),key,userId:o.id,deviceId:t.deviceId,device:type[0].toUpperCase()+type.slice(1),alertType:a.why[0],risk:a.risk,anomalyScore:a.score,reason:a.reason,recommendations:a.recommendations,status:'OPEN',time:rec.updatedAt,metrics:rec.metrics};
  alertsDb.unshift(al);if(alertsDb.length>2000)alertsDb.pop();
- if(a.risk==='HIGH')sendAlertEmail(o.email,al);
+ if(a.risk==='HIGH'&&(!o.settings||o.settings.email!==false))sendAlertEmail(o.email,al);
  if(N8N_ALERT)fetch(N8N_ALERT,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:'SecureMonitor AI Alert',email:o.email,deviceId:t.deviceId,deviceType:type,riskLevel:a.risk,anomalyScore:a.score,timestamp:rec.updatedAt,reason:a.reason,currentMetrics:rec.metrics,recommendedActions:a.recommendations,disclaimer:'This alert does not by itself confirm hacking or compromise.'})}).catch(()=>{})}
 const shape=d=>({...d,connected:Date.now()-Date.parse(d.updatedAt)<120e3,anomalyScore:d.score});
 const body=req=>new Promise(r=>{let d='';req.on('data',x=>{d+=x;if(d.length>1e5)req.destroy()});req.on('end',()=>{try{r(JSON.parse(d||'{}'))}catch{r({})}})});
@@ -100,7 +100,7 @@ http.createServer(async(req,res)=>{
  if(m==='OPTIONS'){res.writeHead(204);return res.end()}   // preflight never reaches auth
  if(!p.startsWith('/api/')){ // serve the frontend
   return fs.readFile(path.join(__dirname,'securemonitor.html'),(e,d)=>{if(e){res.writeHead(404);return res.end('securemonitor.html not found')}res.writeHead(200,{'Content-Type':'text/html; charset=utf-8'});res.end(d)})}
- if(p==='/api/health')return send(res,200,{ok:true,status:'ok',app:'securemonitor',version:'1.0.0',timestamp:new Date().toISOString(),geminiConfigured:!!process.env.GEMINI_API_KEY,n8nConfigured:!!(N8N||N8N_ALERT)});
+ if(p==='/api/health')return send(res,200,{ok:true,status:'ok',app:'securemonitor',version:'1.0.0',timestamp:new Date().toISOString(),geminiConfigured:!!process.env.GEMINI_API_KEY,n8nConfigured:!!(N8N||N8N_ALERT),emailConfigured:!!(process.env.RESEND_API_KEY&&process.env.ALERT_FROM_EMAIL)});
  const b=m==='POST'||m==='PATCH'||m==='PUT'?await body(req):{};
  if((mm=p.match(/^\/api\/telemetry\/(laptop|mobile|iot)$/))&&m==='POST'){ // agents authenticate with a per-user device key, never a client-supplied user id
   const k=req.headers['x-device-key'],o=k&&U.find(x=>x.keyHash&&x.keyHash===sha(String(k)));
@@ -141,6 +141,12 @@ http.createServer(async(req,res)=>{
   for(const[h,s]of sessions)if(s.id===u.id)sessions.delete(h);return send(res,200,{ok:true})}
  const u=who(req);
  if(!u)return send(res,401,{error:'unauthorized'});
+ if(p==='/api/notifications/test-email'&&m==='POST'){
+  const result=await sendAlertEmail(u.email,{risk:'TEST',device:'SecureMonitor AI',alertType:'Test email',anomalyScore:0,time:new Date().toISOString(),reason:'This is a test of SecureMonitor AI email delivery.',recommendations:['If you received this email, email delivery is configured.']});
+  if(result&&result.ok)return send(res,200,{ok:true,message:'Email provider accepted the test email.',to:u.email,id:result.id});
+  if(result&&result.reason==='not_configured')return send(res,503,{ok:false,error:'email_not_configured',message:'Configure RESEND_API_KEY and ALERT_FROM_EMAIL in Render environment variables.'});
+  return send(res,502,{ok:false,error:'email_delivery_failed',message:'Email provider rejected the test email. Check the provider logs and verify the sender domain.'});
+ }
  if(p==='/api/auth/me')return send(res,200,pub(u));
  const mine=()=>[...(devs.get(u.id)||new Map()).values()];
  if(p==='/api/devices'&&m==='GET')return send(res,200,mine().map(shape));

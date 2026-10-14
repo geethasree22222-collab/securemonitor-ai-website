@@ -29,6 +29,7 @@ async function run() {
     if (!health || !health.ok) throw new Error('Health endpoint did not start. ' + logs);
     const healthJson = await health.json();
     if (healthJson.app !== 'securemonitor') throw new Error('Unexpected health response.');
+    if (typeof healthJson.emailConfigured !== 'boolean') throw new Error('Health response missing emailConfigured status.');
 
     const email = `smoke-${crypto.randomBytes(4).toString('hex')}@example.com`;
     const reg = await req('/api/auth/register', {
@@ -59,7 +60,9 @@ async function run() {
 
     const alerts = await req('/api/alerts', { headers: auth });
     if (!alerts.ok || !Array.isArray(await alerts.json())) throw new Error('Alert endpoint failed.');
-    console.log('PASS: health, register, bearer auth, device key, telemetry ingestion, devices, alerts.');
+    const mailTest = await req('/api/notifications/test-email', { method: 'POST', headers: auth, body: '{}' });
+    if (![200, 502, 503].includes(mailTest.status)) throw new Error('Unexpected email test endpoint response: HTTP ' + mailTest.status);
+    console.log('PASS: health, register, bearer auth, device key, telemetry ingestion, devices, alerts, email-test endpoint.');
   } finally {
     server.kill();
     try { fs.rmSync(dataDir, { recursive: true, force: true }); } catch {}

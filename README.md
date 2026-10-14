@@ -49,3 +49,28 @@ Use a private repository. Never commit `.env`, access/refresh tokens, device key
 ## Smoke test
 
 After Node.js is installed, run `npm run check` and `npm run smoke-test`. The smoke test starts its own temporary server and exercises health, registration, authenticated API access, device-key issuance, telemetry ingestion, and alert retrieval.
+
+
+## Real Windows laptop readings (not browser estimates)
+
+1. Open the public website and create/sign in to your account. Keep the laptop where you run the agent as the device being monitored.
+2. Open **Devices** and click **Connect Laptop Agent**. Copy the one-time key shown in the status text. Keep it private. Generating a new key invalidates the previous key for this account.
+3. On the Windows laptop, open PowerShell in this folder's `agent` subfolder, then run:
+
+   ```powershell
+   py -m pip install psutil
+   py laptop_agent.py
+   ```
+
+   Or double-click `agent/run_windows_agent.bat`. Enter `https://securemonitor-ai.onrender.com`, paste the device key, and keep the terminal running. The agent reports real CPU %, system RAM %, C: disk %, cumulative network transfer since the prior poll, and running process count every 30 seconds.
+4. Return to **Dashboard** and choose **Live** (not a colored Demo Mode). After the first telemetry post, Remote Laptop should appear; after the next poll the connection freshness should be visible. The dashboard uses the server's rule-based NORMAL/MEDIUM/HIGH risk. It is an anomaly signal, not proof of compromise.
+
+## Test email alerts
+
+Email requires a Resend account and valid server-side environment variables in Render: `RESEND_API_KEY` and `ALERT_FROM_EMAIL`. The sender address/domain must be accepted/verified by Resend; check the provider's verified sender/domain requirements. Do not paste API keys into browser code, GitHub, or this chat. After adding both values in Render **Environment**, redeploy/restart the service. Sign in to the dashboard, open **Settings → Send Test Email**. A successful response means the email provider accepted the message; check Inbox and Spam for actual delivery. If the UI says the provider is not configured, add the variables first.
+
+Actual anomaly emails are sent for **HIGH** risk events (subject to the account's Email Notifications setting and configured provider). A test email checks the mail path without faking a device alert. The backend health route now includes `emailConfigured` to show whether both variables are present.
+
+## Important service limits
+
+The hosted backend keeps latest telemetry/alerts/sessions in memory, so a process restart clears these readings and alerts; a free service may sleep when idle. The agent is an opt-in monitor that sends the readings it collects; stop it with Ctrl+C. Do not use this prototype as a production security response system.
